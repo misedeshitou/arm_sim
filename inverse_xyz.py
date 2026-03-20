@@ -22,19 +22,10 @@ def calc_dh_matrix(theta, d, a, alpha):
         [ 0,      0,      0,    1]
     ])
 
-# ==========================================
-# 3. 核心逆解算法 (带自适应误差停止)
-# ==========================================
-def calculate_ik_adaptive(x, y, z, roll, pitch, yaw, config=(1, -1, 1), max_iters=50, tol=1e-4):
-    """
-    输入:
-        x, y, z, roll, pitch, yaw: 目标位姿
-        max_iters: 单片机最大允许迭代次数 (防止死循环)
-        tol: 两次迭代间的角度差阈值 (弧度)
-    """
+def calculate_ik_adaptive(x, y, z, roll, pitch, yaw, current_j4_physical=0.0, config=(1, -1, 1), max_iters=50, tol=1e-4):
     sign_shoulder, sign_elbow, sign_wrist = config
     
-    # 1. 目标矩阵构建
+    # ... (前面的 1 和 2 矩阵构建、迭代前置逻辑保持不变) ...
     cy, sy = math.cos(yaw), math.sin(yaw)
     cp, sp = math.cos(pitch), math.sin(pitch)
     cr, sr = math.cos(roll), math.sin(roll)
@@ -48,17 +39,15 @@ def calculate_ik_adaptive(x, y, z, roll, pitch, yaw, config=(1, -1, 1), max_iter
     Z_dir = R_end[:, 2]
     P_wc = P_end - D_PARAMS[5] * Z_dir
     
-    # 2. 开始自适应迭代求解
     theta4_math = 0.0  
     theta = [0.0] * 6
     converged = False
     
     for iteration in range(max_iters):
-        theta4_old = theta4_math # 记录上一次的 theta4
+        theta4_old = theta4_math 
         
-        # --- 核心计算逻辑 ---
+        # ... (中间的逆解推导保持不变，直到计算 theta[3] 和 theta[5] 的地方) ...
         L = math.sqrt(D_PARAMS[3]**2 + (A_PARAMS[3] * math.cos(theta4_math))**2)
-        # psi = math.atan2(A_PARAMS[3] * math.cos(theta4_math), D_PARAMS[3])
         psi = math.atan2(D_PARAMS[3], A_PARAMS[3] * math.cos(theta4_math))
         D_offset = D_PARAMS[2] - A_PARAMS[3] * math.sin(theta4_math)
         
@@ -68,7 +57,6 @@ def calculate_ik_adaptive(x, y, z, roll, pitch, yaw, config=(1, -1, 1), max_iter
         
         phi = math.atan2(P_wc[1], P_wc[0])
         beta = math.asin(D_offset / R_xy) if sign_shoulder > 0 else math.pi - math.asin(D_offset / R_xy)
-        # theta[0] = phi - beta
         theta[0] = phi + beta
         
         X = P_wc[0] * math.cos(theta[0]) + P_wc[1] * math.sin(theta[0])
@@ -76,7 +64,7 @@ def calculate_ik_adaptive(x, y, z, roll, pitch, yaw, config=(1, -1, 1), max_iter
         
         a2 = A_PARAMS[1]
         cos_gamma = (X**2 + Y**2 - a2**2 - L**2) / (2 * a2 * L)
-        cos_gamma = max(-1.0, min(1.0, cos_gamma)) # 钳位保护，防止 acos 报错
+        cos_gamma = max(-1.0, min(1.0, cos_gamma)) 
         
         gamma = sign_elbow * math.acos(cos_gamma)
         theta[2] = gamma - psi
@@ -85,7 +73,6 @@ def calculate_ik_adaptive(x, y, z, roll, pitch, yaw, config=(1, -1, 1), max_iter
         beta_angle = math.atan2(L * math.sin(gamma), a2 + L * math.cos(gamma))
         theta[1] = alpha_angle - beta_angle
         
-        # 计算前三轴矩阵
         T03 = np.eye(4)
         for i in range(3):
             T03 = T03 @ calc_dh_matrix(theta[i], D_PARAMS[i], A_PARAMS[i], ALPHA_PARAMS[i])
@@ -99,28 +86,39 @@ def calculate_ik_adaptive(x, y, z, roll, pitch, yaw, config=(1, -1, 1), max_iter
         sin_t5 = sign_wrist * math.sqrt(max(0.0, 1.0 - r33**2))
         theta[4] = math.atan2(sin_t5, r33)
         
+        # 🌟 这里的 IF-ELSE 是核心修改点 🌟
         if abs(sin_t5) > 1e-6:
             theta[3] = math.atan2(-r23, -r13)
             theta[5] = math.atan2(-r32, r31)
         else:
-            theta[3] = theta4_math 
-            theta[5] = math.atan2(R36[1, 0], R36[0, 0])
+            # 【万向锁触发】
+            # 1. 强制让当前的数学运算保持电机现有的真实姿态
+            print(f"⚠️ 迭代第 {iteration} 次触发万向锁！强制保持 J4 的物理角度: {current_j4_physical:.4f} rad")
+            current_j4_dh = current_j4_physical + THETA_OFFSET[3]
+            theta[3] = current_j4_dh
             
+            # 2. 计算被 J4 和 J6 共享的总偏航角
+            sum_angle = math.atan2(R36[1, 0], R36[0, 0])
+            
+            # 3. 让 J6 单独吃掉所有旋转误差
+            if r33 > 0: # theta5 趋近于 0，同向叠加
+                theta[5] = sum_angle - theta[3]
+            else:       # theta5 趋近于 pi，反向叠加
+                theta[5] = theta[3] - sum_angle
+                
+        # 这个赋值至关重要：在奇异点时，它能保证迭代公式立刻稳定下来不再震荡
         theta4_math = theta[3]
         
-        # --- 🌟 收敛判断 🌟 ---
-        # 考虑到角度在 -pi 和 pi 之间可能会跳跃，用 atan2(sin, cos) 计算真实的角度差
+        # --- 收敛判断 ---
         diff = abs(math.atan2(math.sin(theta4_math - theta4_old), math.cos(theta4_math - theta4_old)))
-        
         if diff < tol:
             converged = True
             print(f"✅ 成功：在第 {iteration + 1} 次迭代后收敛！误差: {diff:.6e}")
             break
 
     if not converged:
-        print(f"⚠️ 警告：达到了最大迭代次数 ({max_iters})，算法未收敛！")
+        raise ValueError(f"⚠️ 达到最大迭代次数 ({max_iters})，算法发散！")
 
-    # 3. 减去 DH 表偏置并归一化
     q_out = [0.0] * 6
     for i in range(6):
         q_out[i] = theta[i] - THETA_OFFSET[i]
@@ -154,8 +152,13 @@ def find_best_ik_solution(x, y, z, roll, pitch, yaw, current_angles):
     for cfg in configs:
         try:
             # 尝试当前构型求解 (如果你之前的代码里加了 print，这里可能会打印很多行)
+            # calc_angles = calculate_ik_adaptive(
+            #     x, y, z, roll, pitch, yaw, 
+            #     config=cfg, max_iters=50, tol=1e-4
+            # )
             calc_angles = calculate_ik_adaptive(
                 x, y, z, roll, pitch, yaw, 
+                current_j4_physical=current_angles[3], # 🔥 把当前的真实 J4 传进去
                 config=cfg, max_iters=50, tol=1e-4
             )
             valid_solutions += 1
@@ -192,41 +195,104 @@ def find_best_ik_solution(x, y, z, roll, pitch, yaw, current_angles):
     print(f"最优构型为: {best_config}, 总移动代价(弧度): {min_cost:.4f}")
     
     return best_angles, best_config, min_cost
+
+def forward_kinematics(joint_angles_rad):
+    """
+    纯数学版的正运动学求解器
+    输入: 
+        joint_angles_rad: 长度为 6 的列表/数组，代表电机的当前弧度角
+    输出:
+        x, y, z: 末端位置 (米)
+        roll, pitch, yaw: 末端姿态 (弧度)
+    """
+    # 1. 机械臂物理参数配置 (固定写死在函数内部，或者作为全局常量)
+    dh_params = np.array([
+        # [theta_off,  d,         alpha,     a  ]
+        [np.pi,       0,         np.pi/2,   0   ],   # J1
+        [0,           0,         0,         0.29],   # J2
+        [0,          -0.10375,  -np.pi/2,   0   ],   # J3
+        [np.pi,       0.410147,  np.pi/2,   0.03],   # J4
+        [np.pi/2,     0,        -np.pi/2,   0   ],   # J5
+        [np.pi,       0.211,     0,         0   ]    # J6
+    ])
+
+    # 2. 依次相乘计算 4x4 齐次变换矩阵
+    T = np.eye(4)
+    for i, row in enumerate(dh_params):
+        theta_total = joint_angles_rad[i] + row[0]
+        d, alpha, a = row[1], row[2], row[3]
+
+        ct, st = np.cos(theta_total), np.sin(theta_total)
+        ca, sa = np.cos(alpha), np.sin(alpha)
+        
+        T_step = np.array([
+            [ct, -st*ca,  st*sa, a*ct],
+            [st,  ct*ca, -ct*sa, a*st],
+            [0,   sa,     ca,    d],
+            [0,   0,      0,     1]
+        ])
+        T = T @ T_step
+
+    # 3. 从 4x4 矩阵 T 中提取 X, Y, Z
+    x, y, z = T[0, 3], T[1, 3], T[2, 3]
+
+    # 4. 提取 Roll, Pitch, Yaw (采用 ZYX 欧拉角约定)
+    sy = np.sqrt(T[0, 0] * T[0, 0] + T[1, 0] * T[1, 0])
+    singular = sy < 1e-6  # 检查是否处于万向锁奇异点
+
+    if not singular:
+        roll = np.arctan2(T[2, 1], T[2, 2])
+        pitch = np.arctan2(-T[2, 0], sy)
+        yaw = np.arctan2(T[1, 0], T[0, 0])
+    else:
+        roll = np.arctan2(-T[1, 2], T[1, 1])
+        pitch = np.arctan2(-T[2, 0], sy)
+        yaw = 0
+
+    return x, y, z, roll, pitch, yaw
 # ==========================================
 # 4. 用户调用示例
 # ==========================================
 if __name__ == "__main__":
     # 我们测试一个姿态相对常规的目标点
     # target_x, target_y, target_z = 0.3, 0.1, 0.3
-    target_x, target_y, target_z = 0.471, 0.1037, 0.4101
-    target_roll, target_pitch, target_yaw = 0.0, np.pi/2, 0.0 
-    # 假设机械臂现在全处于 0 度 (或者某个你读取到的当前电机真实角度)
-    current_motor_angles = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
-#     位置 - X:   0.4710 m, Y:   0.1037 m, Z:   0.4101 m
-# 姿态 - Roll(X):   0.0000°, Pitch(Y):  90.0000°, Yaw(Z):   0.0000°
-    print(f"目标 XYZ: [{target_x}, {target_y}, {target_z}]")
-    print(f"目标 RPY: [{target_roll}, {target_pitch}, {target_yaw}]\n")
+#     =============================================
+# 位置 - X:   0.3025 m, Y:   0.0765 m, Z:   0.1991 m
+# 姿态 - Roll(X):   3.1416, Pitch(Y):  -0.0000, Yaw(Z):   3.1416
+
+#     target_x, target_y, target_z = 0.3025, 0.0765, 0.1991
+#     target_roll, target_pitch, target_yaw = np.pi, 0.0, np.pi 
+#     # 假设机械臂现在全处于 0 度 (或者某个你读取到的当前电机真实角度)
+    current_motor_angles = [0.0, 0.0, 0.0, 2.0, 0.0, 0.0]
+# #     位置 - X:   0.4710 m, Y:   0.1037 m, Z:   0.4101 m
+# # 姿态 - Roll(X):   0.0000°, Pitch(Y):  90.0000°, Yaw(Z):   0.0000°
+#     print(f"目标 XYZ: [{target_x}, {target_y}, {target_z}]")
+#     print(f"目标 RPY: [{target_roll}, {target_pitch}, {target_yaw}]\n")
+
+    # 1. 我们强制构造一个 J5 = 0 (发生万向锁) 的真实电机状态
+    # 注意：J4 = 1.0, J6 = 1.0, 且 J5 = 0.0
+    test_gimbal_lock_angles = [0.0, 0, -0., 0.0, -np.pi/2, 0.0] 
     
-    # try:
-    #     # 这里默认最多迭代 50 次，误差小于 0.0001 弧度时停止
-    #     motor_angles = calculate_ik_adaptive(
-    #         target_x, target_y, target_z, 
-    #         target_roll, target_pitch, target_yaw,
-    #         config=(1, -1, 1),
-    #         max_iters=50,
-    #         tol=1e-4
-    #     )
-    #     print(f"\n=> 输出电机角度 (弧度): {[round(q, 4) for q in motor_angles]}")
-        
-    # except ValueError as e:
-    #     print(f"求解失败: {e}")
+    # 2. 用正运动学算出这个状态下的绝对 XYZ 和 RPY
+    target_x, target_y, target_z, target_roll, target_pitch, target_yaw = forward_kinematics(test_gimbal_lock_angles)
+    # sx, sy, sz, sroll, spitch, syaw = extract_pose_from_matrix(T_singular) # 假设你有这个提取函数，或者直接用 T 矩阵验证
+    
+    # 3. 假装我们不知道 J4 和 J6 是多少，把这个奇异点丢给 IK 去逆解
+    # 并且告诉 IK：我现在物理上 J4 就是 1.0 弧度！
+    test_current_angles = [0.0, 0.0, 0.0, 1.0, 0.0, 0.0]
+
+
     try:
+        #  max_iters=50, tol=1e-4
         best_angles, best_cfg, cost = find_best_ik_solution(
             target_x, target_y, target_z, 
             target_roll, target_pitch, target_yaw,
             current_angles=current_motor_angles
         )
         print(f"\n=> 最终决定发送给电机的角度 (弧度): {[round(q, 4) for q in best_angles]}")
+        x, y, z, roll, pitch, yaw = forward_kinematics(best_angles) # 先看看当前姿态是什么样的
+        print(f"反推 XYZ: [{x}, {y}, {z}]")
+        print(f"反推 RPY: [{roll}, {pitch}, {yaw}]\n")
         
     except ValueError as e:
         print(e)
