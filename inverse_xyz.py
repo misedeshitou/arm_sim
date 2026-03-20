@@ -128,6 +128,70 @@ def calculate_ik_adaptive(x, y, z, roll, pitch, yaw, config=(1, -1, 1), max_iter
         
     return q_out
 
+def find_best_ik_solution(x, y, z, roll, pitch, yaw, current_angles):
+    """
+    遍历 8 种构型，寻找距离当前机械臂姿态最近的最优解
+    输入:
+        x, y, z, roll, pitch, yaw: 目标位姿
+        current_angles: 机械臂当前 6 个电机的实际角度 (弧度列表)
+    输出:
+        最优电机角度列表, 选用的构型, 最小移动代价
+    """
+    # 机械臂的 8 种全部可能的姿态组合 (肩, 肘, 腕)
+    configs = [
+        ( 1,  1,  1), ( 1,  1, -1), 
+        ( 1, -1,  1), ( 1, -1, -1),
+        (-1,  1,  1), (-1,  1, -1), 
+        (-1, -1,  1), (-1, -1, -1)
+    ]
+    
+    best_angles = None
+    best_config = None
+    min_cost = float('inf') # 初始代价设为无穷大
+    
+    valid_solutions = 0 # 记录算出了几个有效解
+    
+    for cfg in configs:
+        try:
+            # 尝试当前构型求解 (如果你之前的代码里加了 print，这里可能会打印很多行)
+            calc_angles = calculate_ik_adaptive(
+                x, y, z, roll, pitch, yaw, 
+                config=cfg, max_iters=50, tol=1e-4
+            )
+            valid_solutions += 1
+            
+            # --- 计算这个解与当前姿态的“移动代价” ---
+            cost = 0.0
+            for i in range(6):
+                # 1. 算出目标角度与当前角度的差值
+                diff = calc_angles[i] - current_angles[i]
+                
+                # 2. 🌟 核心：处理角度越界问题，走最短圆弧！ 
+                # 例如: 179度 走到 -179度，算出来的 diff 是 -358度
+                # 经过这行代码处理后，diff 会变成 2度
+                diff = (diff + math.pi) % (2 * math.pi) - math.pi
+                
+                # 3. 累加绝对值作为代价 (你也可以在这里加权重，比如底座电机重，就乘以 2.0)
+                cost += abs(diff)
+                
+            # 如果这个解的代价比之前记录的都小，就更新“最佳榜单”
+            if cost < min_cost:
+                min_cost = cost
+                best_angles = calc_angles
+                best_config = cfg
+                
+        except ValueError:
+            # 说明这种构型在这个坐标点无解 (够不到或进入死区)，直接跳过，试下一种
+            continue
+            
+    # 遍历完 8 种情况后，检查是否至少找到了一个解
+    if best_angles is None:
+        raise ValueError("严重错误：目标点超出了工作空间，所有 8 种姿态均无法到达！")
+        
+    print(f"\n[寻优完成] 共找到 {valid_solutions} 个有效解。")
+    print(f"最优构型为: {best_config}, 总移动代价(弧度): {min_cost:.4f}")
+    
+    return best_angles, best_config, min_cost
 # ==========================================
 # 4. 用户调用示例
 # ==========================================
@@ -136,21 +200,33 @@ if __name__ == "__main__":
     # target_x, target_y, target_z = 0.3, 0.1, 0.3
     target_x, target_y, target_z = 0.471, 0.1037, 0.4101
     target_roll, target_pitch, target_yaw = 0.0, np.pi/2, 0.0 
+    # 假设机械臂现在全处于 0 度 (或者某个你读取到的当前电机真实角度)
+    current_motor_angles = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 #     位置 - X:   0.4710 m, Y:   0.1037 m, Z:   0.4101 m
 # 姿态 - Roll(X):   0.0000°, Pitch(Y):  90.0000°, Yaw(Z):   0.0000°
     print(f"目标 XYZ: [{target_x}, {target_y}, {target_z}]")
     print(f"目标 RPY: [{target_roll}, {target_pitch}, {target_yaw}]\n")
     
+    # try:
+    #     # 这里默认最多迭代 50 次，误差小于 0.0001 弧度时停止
+    #     motor_angles = calculate_ik_adaptive(
+    #         target_x, target_y, target_z, 
+    #         target_roll, target_pitch, target_yaw,
+    #         config=(1, -1, 1),
+    #         max_iters=50,
+    #         tol=1e-4
+    #     )
+    #     print(f"\n=> 输出电机角度 (弧度): {[round(q, 4) for q in motor_angles]}")
+        
+    # except ValueError as e:
+    #     print(f"求解失败: {e}")
     try:
-        # 这里默认最多迭代 50 次，误差小于 0.0001 弧度时停止
-        motor_angles = calculate_ik_adaptive(
+        best_angles, best_cfg, cost = find_best_ik_solution(
             target_x, target_y, target_z, 
             target_roll, target_pitch, target_yaw,
-            config=(1, -1, 1),
-            max_iters=50,
-            tol=1e-4
+            current_angles=current_motor_angles
         )
-        print(f"\n=> 输出电机角度 (弧度): {[round(q, 4) for q in motor_angles]}")
+        print(f"\n=> 最终决定发送给电机的角度 (弧度): {[round(q, 4) for q in best_angles]}")
         
     except ValueError as e:
-        print(f"求解失败: {e}")
+        print(e)
