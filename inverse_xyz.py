@@ -134,9 +134,8 @@ def calculate_ik_adaptive(x, y, z, roll, pitch, yaw, config=(1, -1, 1), max_iter
 if __name__ == "__main__":
     # 我们测试一个姿态相对常规的目标点
     # target_x, target_y, target_z = 0.3, 0.1, 0.3
-    # target_roll, target_pitch, target_yaw = 0.0, 0.5, 0.0 # Pitch 没有到 90 度这种极端角度
     target_x, target_y, target_z = 0.471, 0.1037, 0.4101
-    target_roll, target_pitch, target_yaw = 0.0, np.pi/2, 0.0 # Pitch 没有到 90 度这种极端角度
+    target_roll, target_pitch, target_yaw = 0.0, np.pi/2, 0.0 
 #     位置 - X:   0.4710 m, Y:   0.1037 m, Z:   0.4101 m
 # 姿态 - Roll(X):   0.0000°, Pitch(Y):  90.0000°, Yaw(Z):   0.0000°
     print(f"目标 XYZ: [{target_x}, {target_y}, {target_z}]")
