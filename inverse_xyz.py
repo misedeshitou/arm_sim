@@ -93,7 +93,7 @@ def calculate_ik_adaptive(x, y, z, roll, pitch, yaw, current_j4_physical=0.0, co
         else:
             # 【万向锁触发】
             # 1. 强制让当前的数学运算保持电机现有的真实姿态
-            print(f"⚠️ 迭代第 {iteration} 次触发万向锁！强制保持 J4 的物理角度: {current_j4_physical:.4f} rad")
+            print(f"⚠️ 迭代第 {iteration + 1} 次触发万向锁！强制保持 J4 的物理角度: {current_j4_physical:.4f} rad")
             current_j4_dh = current_j4_physical + THETA_OFFSET[3]
             theta[3] = current_j4_dh
             
@@ -105,6 +105,11 @@ def calculate_ik_adaptive(x, y, z, roll, pitch, yaw, current_j4_physical=0.0, co
                 theta[5] = sum_angle - theta[3]
             else:       # theta5 趋近于 pi，反向叠加
                 theta[5] = theta[3] - sum_angle
+            q_out = [0.0] * 6
+            for i in range(6):
+                 q_out[i] = theta[i] - THETA_OFFSET[i]
+                 q_out[i] = (q_out[i] + math.pi) % (2 * math.pi) - math.pi
+            return q_out
                 
         # 这个赋值至关重要：在奇异点时，它能保证迭代公式立刻稳定下来不再震荡
         theta4_math = theta[3]
@@ -151,11 +156,6 @@ def find_best_ik_solution(x, y, z, roll, pitch, yaw, current_angles):
     
     for cfg in configs:
         try:
-            # 尝试当前构型求解 (如果你之前的代码里加了 print，这里可能会打印很多行)
-            # calc_angles = calculate_ik_adaptive(
-            #     x, y, z, roll, pitch, yaw, 
-            #     config=cfg, max_iters=50, tol=1e-4
-            # )
             calc_angles = calculate_ik_adaptive(
                 x, y, z, roll, pitch, yaw, 
                 current_j4_physical=current_angles[3], # 🔥 把当前的真实 J4 传进去
@@ -254,36 +254,20 @@ def forward_kinematics(joint_angles_rad):
 # 4. 用户调用示例
 # ==========================================
 if __name__ == "__main__":
-    # 我们测试一个姿态相对常规的目标点
-    # target_x, target_y, target_z = 0.3, 0.1, 0.3
-#     =============================================
-# 位置 - X:   0.3025 m, Y:   0.0765 m, Z:   0.1991 m
-# 姿态 - Roll(X):   3.1416, Pitch(Y):  -0.0000, Yaw(Z):   3.1416
-
-#     target_x, target_y, target_z = 0.3025, 0.0765, 0.1991
-#     target_roll, target_pitch, target_yaw = np.pi, 0.0, np.pi 
-#     # 假设机械臂现在全处于 0 度 (或者某个你读取到的当前电机真实角度)
-    current_motor_angles = [0.0, 0.0, 0.0, 2.0, 0.0, 0.0]
-# #     位置 - X:   0.4710 m, Y:   0.1037 m, Z:   0.4101 m
-# # 姿态 - Roll(X):   0.0000°, Pitch(Y):  90.0000°, Yaw(Z):   0.0000°
-#     print(f"目标 XYZ: [{target_x}, {target_y}, {target_z}]")
-#     print(f"目标 RPY: [{target_roll}, {target_pitch}, {target_yaw}]\n")
-
-    # 1. 我们强制构造一个 J5 = 0 (发生万向锁) 的真实电机状态
-    # 注意：J4 = 1.0, J6 = 1.0, 且 J5 = 0.0
+    current_motor_angles = [0.0, 0.0, 0.0, 3.0, 0.0, 0.0]
     test_gimbal_lock_angles = [0.0, 0, -0., 0.0, -np.pi/2, 0.0] 
     
     # 2. 用正运动学算出这个状态下的绝对 XYZ 和 RPY
     target_x, target_y, target_z, target_roll, target_pitch, target_yaw = forward_kinematics(test_gimbal_lock_angles)
+    print(f"构造的万向锁点 XYZ: [{target_x:.4f}, {target_y:.4f}, {target_z:.4f}]")
+    print(f"构造的万向锁点 RPY: [{target_roll:.4f}, {target_pitch:.4f}, {target_yaw:.4f}]\n")
     # sx, sy, sz, sroll, spitch, syaw = extract_pose_from_matrix(T_singular) # 假设你有这个提取函数，或者直接用 T 矩阵验证
     
     # 3. 假装我们不知道 J4 和 J6 是多少，把这个奇异点丢给 IK 去逆解
     # 并且告诉 IK：我现在物理上 J4 就是 1.0 弧度！
     test_current_angles = [0.0, 0.0, 0.0, 1.0, 0.0, 0.0]
 
-
     try:
-        #  max_iters=50, tol=1e-4
         best_angles, best_cfg, cost = find_best_ik_solution(
             target_x, target_y, target_z, 
             target_roll, target_pitch, target_yaw,
