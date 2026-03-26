@@ -5,7 +5,7 @@ import math
 # 1. 机械臂物理参数配置 (MCU 上的 const 数组)
 # ==========================================
 A_PARAMS     = [0.0,       0.290, 0.0,      0.03,      0.0,       0.0]
-D_PARAMS     = [0.0,       0.0,  -0.10375,  0.410147,  0.0,       0.211]
+D_PARAMS     = [0.0,       0.0,  -0.10375,  0.40147,  0.0,       0.211]
 ALPHA_PARAMS = [math.pi/2, 0.0,  -math.pi/2, math.pi/2, -math.pi/2, 0.0]
 THETA_OFFSET = [math.pi,   0.0,   0.0,      math.pi,   math.pi/2, math.pi]
 
@@ -35,9 +35,13 @@ def calculate_ik_adaptive(x, y, z, roll, pitch, yaw, current_j4_physical=0.0, co
         [sy*cp, sy*sp*sr + cy*cr, sy*sp*cr - cy*sr],
         [-sp,   cp*sr,            cp*cr]
     ])
+    print(f"目标末端旋转矩阵 R_end:\n{R_end}")
     P_end = np.array([x, y, z])
+    print(f"目标末端位置 P_end: {P_end}")
     Z_dir = R_end[:, 2]
+    print(f"末端 Z 轴方向 Z_dir: {Z_dir}")
     P_wc = P_end - D_PARAMS[5] * Z_dir
+    print(f"计算得到的腕心位置 P_wc: {P_wc}")
 
     theta4_math = 0.0  
     theta = [0.0] * 6
@@ -50,6 +54,7 @@ def calculate_ik_adaptive(x, y, z, roll, pitch, yaw, current_j4_physical=0.0, co
         L = math.sqrt(D_PARAMS[3]**2 + (A_PARAMS[3] * math.cos(theta4_math))**2)
         psi = math.atan2(D_PARAMS[3], A_PARAMS[3] * math.cos(theta4_math))
         D_offset = D_PARAMS[2] - A_PARAMS[3] * math.sin(theta4_math)
+        print(f"迭代 {iteration + 1}: 当前 J4 数学角度: {theta4_math:.4f} rad,L: {L:.4f} ,psi: {psi:.4f} rad, D_offset: {D_offset:.4f} m")
 
         R_xy = math.sqrt(P_wc[0]**2 + P_wc[1]**2)
         if R_xy < abs(D_offset):
@@ -141,10 +146,8 @@ def find_best_ik_solution(x, y, z, roll, pitch, yaw, current_angles):
     """
     # 机械臂的 8 种全部可能的姿态组合 (肩, 肘, 腕)
     configs = [
-        ( 1,  1,  1), ( 1,  1, -1), 
-        ( 1, -1,  1), ( 1, -1, -1),
-        (-1,  1,  1), (-1,  1, -1), 
-        (-1, -1,  1), (-1, -1, -1)
+        (1,1,1),(1,1,-1),(1,-1,1),(1,-1,-1),
+        (-1,1,1),(-1,1,-1),(-1,-1,1),(-1,-1,-1)
     ]
 
     best_angles = None
@@ -253,11 +256,17 @@ def forward_kinematics(joint_angles_rad):
 # 4. 用户调用示例
 # ==========================================
 if __name__ == "__main__":
-    current_motor_angles = [1.0, 0.3, 2.0, 3.0, 0.0, -1.0]
+    current_motor_angles = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
     test_gimbal_lock_angles = [1.0, 0, -0.4, 3.0, -np.pi/2, 3.0]
 
     # 2. 用正运动学算出这个状态下的绝对 XYZ 和 RPY
-    target_x, target_y, target_z, target_roll, target_pitch, target_yaw = forward_kinematics(test_gimbal_lock_angles)
+    # target_x, target_y, target_z, target_roll, target_pitch, target_yaw = forward_kinematics(test_gimbal_lock_angles)
+    target_x=-0.16788
+    target_y=-0.570374
+    target_z=0.55304
+    target_roll=-2.43941
+    target_pitch=0.356422
+    target_yaw=-0.438135
     print(f"构造的万向锁点 XYZ: [{target_x:.4f}, {target_y:.4f}, {target_z:.4f}]")
     print(f"构造的万向锁点 RPY: [{target_roll:.4f}, {target_pitch:.4f}, {target_yaw:.4f}]\n")
     # sx, sy, sz, sroll, spitch, syaw = extract_pose_from_matrix(T_singular) # 假设你有这个提取函数，或者直接用 T 矩阵验证
