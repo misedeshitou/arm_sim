@@ -15,7 +15,7 @@ class StandardDHArm:
         """
         ct, st = np.cos(theta), np.sin(theta)
         ca, sa = np.cos(alpha), np.sin(alpha)
-        
+
         return np.array([
             [ct, -st*ca,  st*sa, a*ct],
             [st,  ct*ca, -ct*sa, a*st],
@@ -29,7 +29,7 @@ class StandardDHArm:
         采用标准的 ZYX 欧拉角约定
         """
         x, y, z = T[0, 3], T[1, 3], T[2, 3]
-        
+
         # 计算 Roll (X), Pitch (Y), Yaw (Z)
         sy = np.sqrt(T[0, 0] * T[0, 0] + T[1, 0] * T[1, 0])
         singular = sy < 1e-6 # 检查是否处于万向锁奇异点
@@ -48,19 +48,19 @@ class StandardDHArm:
         # 1. 计算所有坐标系矩阵
         transforms = [np.eye(4)]
         current_T = np.eye(4)
-        
+
         for i, row in enumerate(self.dh_table):
             theta_total = joint_angles_rad[i] + row[0]
             d, alpha, a = row[1], row[2], row[3]
-            
+
             T_step = self.get_matrix(theta_total, d, alpha, a)
             current_T = current_T @ T_step
             transforms.append(current_T)
-        
+
         # 🌟 提取并输出末端位姿 🌟
         EE_T = transforms[-1]
         x, y, z, roll, pitch, yaw = self.extract_pose(EE_T)
-        
+
         print("=" * 45)
         print("🎯 末端执行器 (End-Effector) 实时位姿")
         print("=" * 45)
@@ -72,7 +72,7 @@ class StandardDHArm:
         positions = np.array([T[:3, 3] for T in transforms])
         fig = plt.figure(figsize=(10, 8))
         ax = fig.add_subplot(111, projection='3d')
-        
+
         # 绘制连杆
         ax.plot(positions[:, 0], positions[:, 1], positions[:, 2], 'o-', 
                 color='#2c3e50', linewidth=4, markersize=8, label="Robot Links")
@@ -92,7 +92,7 @@ class StandardDHArm:
         # 图表修饰
         ax.set_xlabel('X (m)'); ax.set_ylabel('Y (m)'); ax.set_zlabel('Z (m)')
         ax.set_title("6-DOF Arm ($\theta, d, \\alpha, a$ Order) - Radian Input")
-        
+
         # 保持等比例
         max_range = np.array([positions[:,0].max()-positions[:,0].min(), 
                               positions[:,1].max()-positions[:,1].min(), 
@@ -101,7 +101,7 @@ class StandardDHArm:
         ax.set_xlim(mid[0]-max_range, mid[0]+max_range)
         ax.set_ylim(mid[1]-max_range, mid[1]+max_range)
         ax.set_zlim(mid[2]-max_range, mid[2]+max_range)
-        
+
         plt.show()
 
 
@@ -110,17 +110,15 @@ def main():
     dh_params = np.array([
         # [theta_off,  d,         alpha,     a  ]
         [np.pi,       0,         np.pi/2,   0   ],   # J1
-        [0,           0,         0,         0.116],   # J2
-        [0,          -0.0415,  -np.pi/2,   0   ],   # J3
-        [np.pi,       0.16086,  np.pi/2,   0.012],   # J4
+        [0,           0,         0,         0.29],   # J2
+        [0,          -0.10375,  -np.pi/2,   0   ],   # J3
+        [np.pi,       0.410147,  np.pi/2,   0.03],   # J4
         [np.pi/2,     0,        -np.pi/2,   0   ],   # J5
-        [np.pi,       0.0844,     0,         0   ]    # J6
+        [np.pi,       0.211,     0,         0   ]    # J6
     ])
 
     # 在这里调节 6 个关节的实时转动角度 (从初始姿态开始转) 单位：弧度 (Radian)
-    # target_angles = [0, 0, 0, 0, 0, -3.1416]
-    # target_angles = [0, 0.996982, -1.49634, -3.14159, 0.499354, 0]   
-    target_angles=[0.1,0.2,0.3,0.4,0.5,0.6]
+    target_angles = [0.9914, 1.3127, -2.6003, 3.1373, -0.6832, 2.8691]
     # target_angles = [0.5867, 1.241, 0.0665, -3.1416, 0.2633, 0.5867] 
     # target_angles = [3.1415, 2.0117, 2.9954, 0.0005, -1.2761, -0.0005]
     # target_angles = [3.1415, 2.0117, 2.9954, 0.0005, -1.2761, -0.0005]

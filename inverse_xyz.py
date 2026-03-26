@@ -4,21 +4,10 @@ import math
 # ==========================================
 # 1. 机械臂物理参数配置 (MCU 上的 const 数组)
 # ==========================================
-# A_PARAMS     = [0.0,       0.290, 0.0,      0.03,      0.0,       0.0]
-# D_PARAMS     = [0.0,       0.0,  -0.10375,  0.410147,  0.0,       0.211]
-# ALPHA_PARAMS = [math.pi/2, 0.0,  -math.pi/2, math.pi/2, -math.pi/2, 0.0]
-# THETA_OFFSET = [math.pi,   0.0,   0.0,      math.pi,   math.pi/2, math.pi]
-
-# 自定义
-A_PARAMS     = [0.0,       0.116, 0.0,      0.012,      0.0,       0.0]
-D_PARAMS     = [0.0,       0.0,  -0.0415,  0.16086,  0.0,       0.0844]
+A_PARAMS     = [0.0,       0.290, 0.0,      0.03,      0.0,       0.0]
+D_PARAMS     = [0.0,       0.0,  -0.10375,  0.410147,  0.0,       0.211]
 ALPHA_PARAMS = [math.pi/2, 0.0,  -math.pi/2, math.pi/2, -math.pi/2, 0.0]
-THETA_OFFSET = [math.pi,   0.0,   0.0,      math.pi,   math.pi/2, 0.0]
-
-# constexpr float theta[6] = {sp::SP_PI, 0, 0, sp::SP_PI, sp::SP_PI / 2, 0};
-# constexpr float d[6] = {0, 0, -0.0415, 0.16086, 0, 0};
-# constexpr float a[6] = {0, 0.116, 0, 0.012, 0, 0};
-# constexpr float alpha[6] = {sp::SP_PI / 2, 0, -sp::SP_PI / 2, sp::SP_PI / 2, -sp::SP_PI / 2, 0};
+THETA_OFFSET = [math.pi,   0.0,   0.0,      math.pi,   math.pi/2, math.pi]
 
 # ==========================================
 # 2. 基础数学工具
@@ -35,12 +24,12 @@ def calc_dh_matrix(theta, d, a, alpha):
 
 def calculate_ik_adaptive(x, y, z, roll, pitch, yaw, current_j4_physical=0.0, config=(1, -1, 1), max_iters=50, tol=1e-4):
     sign_shoulder, sign_elbow, sign_wrist = config
-    
+
     # ... (前面的 1 和 2 矩阵构建、迭代前置逻辑保持不变) ...
     cy, sy = math.cos(yaw), math.sin(yaw)
     cp, sp = math.cos(pitch), math.sin(pitch)
     cr, sr = math.cos(roll), math.sin(roll)
-    
+
     R_end = np.array([
         [cy*cp, cy*sp*sr - sy*cr, cy*sp*cr + sy*sr],
         [sy*cp, sy*sp*sr + cy*cr, sy*sp*cr - cy*sr],
@@ -48,96 +37,87 @@ def calculate_ik_adaptive(x, y, z, roll, pitch, yaw, current_j4_physical=0.0, co
     ])
     P_end = np.array([x, y, z])
     Z_dir = R_end[:, 2]
-    # print(f"初始目标点 P_end: {P_end}, Z_dir: {Z_dir}")
     P_wc = P_end - D_PARAMS[5] * Z_dir
-    print(f"初始迭代目标点 P_wc: {P_wc}")
-    
-    theta4_math = -90  
+
+    theta4_math = 0.0  
     theta = [0.0] * 6
     converged = False
-    
+
     for iteration in range(max_iters):
         theta4_old = theta4_math 
-        
+
         # ... (中间的逆解推导保持不变，直到计算 theta[3] 和 theta[5] 的地方) ...
         L = math.sqrt(D_PARAMS[3]**2 + (A_PARAMS[3] * math.cos(theta4_math))**2)
         psi = math.atan2(D_PARAMS[3], A_PARAMS[3] * math.cos(theta4_math))
         D_offset = D_PARAMS[2] - A_PARAMS[3] * math.sin(theta4_math)
-        
-        R_xy = math.sqrt(P_wc[0]**2 + P_wc[1]**2)
 
-        print(f"迭代 {iteration + 1}: L={L:.4f}, psi={psi:.4f}, D_offset={D_offset:.4f}, R_xy={R_xy:.4f}")
+        R_xy = math.sqrt(P_wc[0]**2 + P_wc[1]**2)
         if R_xy < abs(D_offset):
             raise ValueError(f"迭代第 {iteration} 次时进入死区！目标点过近。")
-        
+
         phi = math.atan2(P_wc[1], P_wc[0])
         beta = math.asin(D_offset / R_xy) if sign_shoulder > 0 else math.pi - math.asin(D_offset / R_xy)
         theta[0] = phi + beta
-        
+
         X = P_wc[0] * math.cos(theta[0]) + P_wc[1] * math.sin(theta[0])
         Y = P_wc[2]
-        
-        print(f"迭代 {iteration + 1}: X={X:.4f}, Y={Y:.4f}, L={L:.4f}, psi={psi:.4f}, theta4_math={theta4_math:.4f}")
+
         a2 = A_PARAMS[1]
         cos_gamma = (X**2 + Y**2 - a2**2 - L**2) / (2 * a2 * L)
         cos_gamma = max(-1.0, min(1.0, cos_gamma)) 
-        
+
         gamma = sign_elbow * math.acos(cos_gamma)
         theta[2] = gamma - psi
-        
+
         alpha_angle = math.atan2(Y, X)
         beta_angle = math.atan2(L * math.sin(gamma), a2 + L * math.cos(gamma))
         theta[1] = alpha_angle - beta_angle
-        print(f"计算得到的 theta[0-2]: {[round(t, 4) for t in theta[:3]]}")
-        
+
         T03 = np.eye(4)
         for i in range(3):
             T03 = T03 @ calc_dh_matrix(theta[i], D_PARAMS[i], A_PARAMS[i], ALPHA_PARAMS[i])
-            
+
         R03 = T03[0:3, 0:3]
         R36 = R03.T @ R_end
-        
+
         r13, r23, r33 = R36[0, 2], R36[1, 2], R36[2, 2]
         r31, r32 = R36[2, 0], R36[2, 1]
-        
+
         sin_t5 = sign_wrist * math.sqrt(max(0.0, 1.0 - r33**2))
-        print(f"r33: {r33:.4f}, sin_t5: {sin_t5:.4f}")
         theta[4] = math.atan2(sin_t5, r33)
-        
+
         # 🌟 这里的 IF-ELSE 是核心修改点 🌟
         if abs(sin_t5) > 1e-6:
             theta[3] = math.atan2(-r23, -r13)
             theta[5] = math.atan2(-r32, r31)
         else:
             # 【万向锁触发】
-            # 1. 强制让当前的数学运算保持电机现有的真实姿态
             print(f"⚠️ 迭代第 {iteration + 1} 次触发万向锁！强制保持 J4 的物理角度: {current_j4_physical:.4f} rad")
             current_j4_dh = current_j4_physical + THETA_OFFSET[3]
             theta[3] = current_j4_dh
-            
+
             # 2. 计算被 J4 和 J6 共享的总偏航角
             sum_angle = math.atan2(R36[1, 0], R36[0, 0])
-            
+
             # 3. 让 J6 单独吃掉所有旋转误差
-            if r33 > 0: # theta5 趋近于 0，同向叠加
+            if r33 > 0:
                 theta[5] = sum_angle - theta[3]
-            else:       # theta5 趋近于 pi，反向叠加
+            else:
                 theta[5] = theta[3] - sum_angle
-            q_out = [0.0] * 6
-            for i in range(6):
-                 q_out[i] = theta[i] - THETA_OFFSET[i]
-                 q_out[i] = (q_out[i] + math.pi) % (2 * math.pi) - math.pi
-            return q_out
-                
-        # 这个赋值至关重要：在奇异点时，它能保证迭代公式立刻稳定下来不再震荡
+
+            # 🔥 修复说明：这里绝对不能 return！
+            # 必须让代码往下走，执行 theta4_math = theta[3]
+            # 并在下一次迭代中用强制锁死的 J4 重新补偿 J1/J2/J3 的偏差！
+
+            # 这个赋值至关重要：在奇异点时，它能保证迭代公式立刻稳定下来不再震荡
         theta4_math = theta[3]
-        
+
         # --- 收敛判断 ---
         diff = abs(math.atan2(math.sin(theta4_math - theta4_old), math.cos(theta4_math - theta4_old)))
+        # ... 后续保持不变
         if diff < tol:
             converged = True
             print(f"✅ 成功：在第 {iteration + 1} 次迭代后收敛！误差: {diff:.6e}")
-            print(f"最终迭代结果theta: {theta}")
             break
 
     if not converged:
@@ -147,7 +127,7 @@ def calculate_ik_adaptive(x, y, z, roll, pitch, yaw, current_j4_physical=0.0, co
     for i in range(6):
         q_out[i] = theta[i] - THETA_OFFSET[i]
         q_out[i] = (q_out[i] + math.pi) % (2 * math.pi) - math.pi
-        
+
     return q_out
 
 def find_best_ik_solution(x, y, z, roll, pitch, yaw, current_angles):
@@ -160,21 +140,19 @@ def find_best_ik_solution(x, y, z, roll, pitch, yaw, current_angles):
         最优电机角度列表, 选用的构型, 最小移动代价
     """
     # 机械臂的 8 种全部可能的姿态组合 (肩, 肘, 腕)
-    # configs = [
-    #     ( 1,  1,  1), ( 1,  1, -1), 
-    #     ( 1, -1,  1), ( 1, -1, -1),
-    #     (-1,  1,  1), (-1,  1, -1), 
-    #     (-1, -1,  1), (-1, -1, -1)
-    # ]
     configs = [
-        ( -1,  1,  -1)]
-    
+        ( 1,  1,  1), ( 1,  1, -1), 
+        ( 1, -1,  1), ( 1, -1, -1),
+        (-1,  1,  1), (-1,  1, -1), 
+        (-1, -1,  1), (-1, -1, -1)
+    ]
+
     best_angles = None
     best_config = None
     min_cost = float('inf') # 初始代价设为无穷大
-    
+
     valid_solutions = 0 # 记录算出了几个有效解
-    
+
     for cfg in configs:
         try:
             calc_angles = calculate_ik_adaptive(
@@ -183,38 +161,38 @@ def find_best_ik_solution(x, y, z, roll, pitch, yaw, current_angles):
                 config=cfg, max_iters=50, tol=1e-4
             )
             valid_solutions += 1
-            
+
             # --- 计算这个解与当前姿态的“移动代价” ---
             cost = 0.0
             for i in range(6):
                 # 1. 算出目标角度与当前角度的差值
                 diff = calc_angles[i] - current_angles[i]
-                
+
                 # 2. 🌟 核心：处理角度越界问题，走最短圆弧！ 
                 # 例如: 179度 走到 -179度，算出来的 diff 是 -358度
                 # 经过这行代码处理后，diff 会变成 2度
                 diff = (diff + math.pi) % (2 * math.pi) - math.pi
-                
+
                 # 3. 累加绝对值作为代价 (你也可以在这里加权重，比如底座电机重，就乘以 2.0)
                 cost += abs(diff)
-                
+
             # 如果这个解的代价比之前记录的都小，就更新“最佳榜单”
             if cost < min_cost:
                 min_cost = cost
                 best_angles = calc_angles
                 best_config = cfg
-                
+
         except ValueError:
             # 说明这种构型在这个坐标点无解 (够不到或进入死区)，直接跳过，试下一种
             continue
-            
+
     # 遍历完 8 种情况后，检查是否至少找到了一个解
     if best_angles is None:
         raise ValueError("严重错误：目标点超出了工作空间，所有 8 种姿态均无法到达！")
-        
+
     print(f"\n[寻优完成] 共找到 {valid_solutions} 个有效解。")
     print(f"最优构型为: {best_config}, 总移动代价(弧度): {min_cost:.4f}")
-    
+
     return best_angles, best_config, min_cost
 
 def forward_kinematics(joint_angles_rad):
@@ -230,11 +208,11 @@ def forward_kinematics(joint_angles_rad):
     dh_params = np.array([
         # [theta_off,  d,         alpha,     a  ]
         [np.pi,       0,         np.pi/2,   0   ],   # J1
-        [0,           0,         0,         0.116],   # J2
-        [0,          -0.0415,  -np.pi/2,   0   ],   # J3
-        [np.pi,       0.16086,  np.pi/2,   0.012],   # J4
+        [0,           0,         0,         0.29],   # J2
+        [0,          -0.10375,  -np.pi/2,   0   ],   # J3
+        [np.pi,       0.410147,  np.pi/2,   0.03],   # J4
         [np.pi/2,     0,        -np.pi/2,   0   ],   # J5
-        [np.pi,       0.0844,     0,         0   ]    # J6
+        [np.pi,       0.211,     0,         0   ]    # J6
     ])
 
     # 2. 依次相乘计算 4x4 齐次变换矩阵
@@ -245,7 +223,7 @@ def forward_kinematics(joint_angles_rad):
 
         ct, st = np.cos(theta_total), np.sin(theta_total)
         ca, sa = np.cos(alpha), np.sin(alpha)
-        
+
         T_step = np.array([
             [ct, -st*ca,  st*sa, a*ct],
             [st,  ct*ca, -ct*sa, a*st],
@@ -275,17 +253,15 @@ def forward_kinematics(joint_angles_rad):
 # 4. 用户调用示例
 # ==========================================
 if __name__ == "__main__":
-    # current_motor_angles = [0.0, 0.0, 0.0, 3.0, 0.0, 0.0]
-    current_motor_angles = [0.17, 0.04, 1.55, 5.57, 0.557, 0.30]
-    test_gimbal_lock_angles = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6] 
-    
+    current_motor_angles = [1.0, 0.3, 2.0, 3.0, 0.0, -1.0]
+    test_gimbal_lock_angles = [1.0, 0, -0.4, 3.0, -np.pi/2, 3.0]
+
     # 2. 用正运动学算出这个状态下的绝对 XYZ 和 RPY
-    # target_x, target_y, target_z, target_roll, target_pitch, target_yaw = forward_kinematics(test_gimbal_lock_angles)
-    target_x, target_y, target_z, target_roll, target_pitch, target_yaw =[-0.0991,-0.0759,0.1561,1.6536,1.1574,-1.046]
+    target_x, target_y, target_z, target_roll, target_pitch, target_yaw = forward_kinematics(test_gimbal_lock_angles)
     print(f"构造的万向锁点 XYZ: [{target_x:.4f}, {target_y:.4f}, {target_z:.4f}]")
     print(f"构造的万向锁点 RPY: [{target_roll:.4f}, {target_pitch:.4f}, {target_yaw:.4f}]\n")
     # sx, sy, sz, sroll, spitch, syaw = extract_pose_from_matrix(T_singular) # 假设你有这个提取函数，或者直接用 T 矩阵验证
-    
+
     # 3. 假装我们不知道 J4 和 J6 是多少，把这个奇异点丢给 IK 去逆解
     # 并且告诉 IK：我现在物理上 J4 就是 1.0 弧度！
     test_current_angles = [0.0, 0.0, 0.0, 1.0, 0.0, 0.0]
@@ -300,6 +276,6 @@ if __name__ == "__main__":
         x, y, z, roll, pitch, yaw = forward_kinematics(best_angles) # 先看看当前姿态是什么样的
         print(f"反推 XYZ: [{x}, {y}, {z}]")
         print(f"反推 RPY: [{roll}, {pitch}, {yaw}]\n")
-        
+
     except ValueError as e:
         print(e)
