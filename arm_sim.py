@@ -29,6 +29,7 @@ class StandardDHArm:
         采用标准的 ZYX 欧拉角约定
         """
         x, y, z = T[0, 3], T[1, 3], T[2, 3]
+        print(T)
 
         # 计算 Roll (X), Pitch (Y), Yaw (Z)
         sy = np.sqrt(T[0, 0] * T[0, 0] + T[1, 0] * T[1, 0])
@@ -107,18 +108,30 @@ class StandardDHArm:
 
 def main():
     #  [theta_offset, d, alpha, a]
+    # 大臂
+    # dh_params = np.array([
+    #     # [theta_off,  d,         alpha,     a  ]
+    #     [np.pi,       0,         np.pi/2,   0   ],   # J1
+    #     [0,           0,         0,         0.29],   # J2
+    #     [0,          -0.10375,  -np.pi/2,   0   ],   # J3
+    #     [np.pi,       0.410147,  np.pi/2,   0.03],   # J4
+    #     [np.pi/2,     0,        -np.pi/2,   0   ],   # J5
+    #     [0,       0.211,     0,         0   ]    # J6
+    # ])
+    # 自定义
+     #  [theta_offset, d, alpha, a]
     dh_params = np.array([
         # [theta_off,  d,         alpha,     a  ]
         [np.pi,       0,         np.pi/2,   0   ],   # J1
-        [0,           0,         0,         0.29],   # J2
-        [0,          -0.10375,  -np.pi/2,   0   ],   # J3
-        [np.pi,       0.410147,  np.pi/2,   0.03],   # J4
+        [0,           0,         0,         0.116],   # J2
+        [0,          -0.0415,  -np.pi/2,   0   ],   # J3
+        [np.pi,       0.16086,  np.pi/2,   0.012],   # J4
         [np.pi/2,     0,        -np.pi/2,   0   ],   # J5
-        [np.pi,       0.211,     0,         0   ]    # J6
+        [0,       0.0844,     0,         0   ]    # J6
     ])
 
     # 在这里调节 6 个关节的实时转动角度 (从初始姿态开始转) 单位：弧度 (Radian)
-    target_angles = [0.9914, 1.3127, -2.6003, 3.1373, -0.6832, 2.8691]
+    target_angles = [0., 0., 0., 0.0, 0.0, 0.0]
     # target_angles = [0.5867, 1.241, 0.0665, -3.1416, 0.2633, 0.5867] 
     # target_angles = [3.1415, 2.0117, 2.9954, 0.0005, -1.2761, -0.0005]
     # target_angles = [3.1415, 2.0117, 2.9954, 0.0005, -1.2761, -0.0005]

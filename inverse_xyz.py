@@ -35,13 +35,13 @@ def calculate_ik_adaptive(x, y, z, roll, pitch, yaw, current_j4_physical=0.0, co
         [sy*cp, sy*sp*sr + cy*cr, sy*sp*cr - cy*sr],
         [-sp,   cp*sr,            cp*cr]
     ])
-    print(f"目标末端旋转矩阵 R_end:\n{R_end}")
+    # print(f"目标末端旋转矩阵 R_end:\n{R_end}")
     P_end = np.array([x, y, z])
-    print(f"目标末端位置 P_end: {P_end}")
+    # print(f"目标末端位置 P_end: {P_end}")
     Z_dir = R_end[:, 2]
-    print(f"末端 Z 轴方向 Z_dir: {Z_dir}")
+    # print(f"末端 Z 轴方向 Z_dir: {Z_dir}")
     P_wc = P_end - D_PARAMS[5] * Z_dir
-    print(f"计算得到的腕心位置 P_wc: {P_wc}")
+    # print(f"计算得到的腕心位置 P_wc: {P_wc}")
 
     theta4_math = 0.0  
     theta = [0.0] * 6
@@ -54,7 +54,7 @@ def calculate_ik_adaptive(x, y, z, roll, pitch, yaw, current_j4_physical=0.0, co
         L = math.sqrt(D_PARAMS[3]**2 + (A_PARAMS[3] * math.cos(theta4_math))**2)
         psi = math.atan2(D_PARAMS[3], A_PARAMS[3] * math.cos(theta4_math))
         D_offset = D_PARAMS[2] - A_PARAMS[3] * math.sin(theta4_math)
-        print(f"迭代 {iteration + 1}: 当前 J4 数学角度: {theta4_math:.4f} rad,L: {L:.4f} ,psi: {psi:.4f} rad, D_offset: {D_offset:.4f} m")
+        # print(f"迭代 {iteration + 1}: 当前 J4 数学角度: {theta4_math:.4f} rad,L: {L:.4f} ,psi: {psi:.4f} rad, D_offset: {D_offset:.4f} m")
 
         R_xy = math.sqrt(P_wc[0]**2 + P_wc[1]**2)
         if R_xy < abs(D_offset):
@@ -208,16 +208,27 @@ def forward_kinematics(joint_angles_rad):
         roll, pitch, yaw: 末端姿态 (弧度)
     """
     # 1. 机械臂物理参数配置 (固定写死在函数内部，或者作为全局常量)
+    # # 大臂
+    # dh_params = np.array([
+    #     # [theta_off,  d,         alpha,     a  ]
+    #     [np.pi,       0,         np.pi/2,   0   ],   # J1
+    #     [0,           0,         0,         0.29],   # J2
+    #     [0,          -0.10375,  -np.pi/2,   0   ],   # J3
+    #     [np.pi,       0.410147,  np.pi/2,   0.03],   # J4
+    #     [np.pi/2,     0,        -np.pi/2,   0   ],   # J5
+    #     [np.pi,       0.211,     0,         0   ]    # J6
+    # ])
+    # 自定义
+     #  [theta_offset, d, alpha, a]
     dh_params = np.array([
         # [theta_off,  d,         alpha,     a  ]
         [np.pi,       0,         np.pi/2,   0   ],   # J1
-        [0,           0,         0,         0.29],   # J2
-        [0,          -0.10375,  -np.pi/2,   0   ],   # J3
-        [np.pi,       0.410147,  np.pi/2,   0.03],   # J4
+        [0,           0,         0,         0.116],   # J2
+        [0,          -0.0415,  -np.pi/2,   0   ],   # J3
+        [np.pi,       0.16086,  np.pi/2,   0.012],   # J4
         [np.pi/2,     0,        -np.pi/2,   0   ],   # J5
-        [np.pi,       0.211,     0,         0   ]    # J6
+        [0,       0.0844,     0,         0   ]    # J6
     ])
-
     # 2. 依次相乘计算 4x4 齐次变换矩阵
     T = np.eye(4)
     for i, row in enumerate(dh_params):
@@ -261,12 +272,15 @@ if __name__ == "__main__":
 
     # 2. 用正运动学算出这个状态下的绝对 XYZ 和 RPY
     # target_x, target_y, target_z, target_roll, target_pitch, target_yaw = forward_kinematics(test_gimbal_lock_angles)
-    target_x=-0.16788
-    target_y=-0.570374
-    target_z=0.55304
-    target_roll=-2.43941
-    target_pitch=0.356422
-    target_yaw=-0.438135
+    target_x=-0.1884
+    target_y=-0.0415
+    target_z=0.16086
+    # target_roll=2.35619
+    # target_pitch=-np.pi/2
+    # target_yaw=-2.35619
+    target_roll=-np.pi
+    target_pitch=np.pi/2
+    target_yaw=0
     print(f"构造的万向锁点 XYZ: [{target_x:.4f}, {target_y:.4f}, {target_z:.4f}]")
     print(f"构造的万向锁点 RPY: [{target_roll:.4f}, {target_pitch:.4f}, {target_yaw:.4f}]\n")
     # sx, sy, sz, sroll, spitch, syaw = extract_pose_from_matrix(T_singular) # 假设你有这个提取函数，或者直接用 T 矩阵验证
