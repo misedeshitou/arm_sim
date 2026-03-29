@@ -59,7 +59,9 @@ class StandardDHArm:
             transforms.append(current_T)
 
         # 🌟 提取并输出末端位姿 🌟
+        # print(transforms)
         EE_T = transforms[-1]
+        print(EE_T)
         x, y, z, roll, pitch, yaw = self.extract_pose(EE_T)
 
         print("=" * 45)
@@ -131,7 +133,9 @@ def main():
     ])
 
     # 在这里调节 6 个关节的实时转动角度 (从初始姿态开始转) 单位：弧度 (Radian)
-    target_angles = [0., 0., 0., 0.0, 0.0, 0.0]
+    # target_angles = [0.496, -0.589, 1.1693, -0.5772, 0.5023, 2.8778]
+    # target_angles = [0,0,0,0,0,0]
+    target_angles = [0.498671,-0.5887,1.29226,2.52,2.53697,-0.3857]
     # target_angles = [0.5867, 1.241, 0.0665, -3.1416, 0.2633, 0.5867] 
     # target_angles = [3.1415, 2.0117, 2.9954, 0.0005, -1.2761, -0.0005]
     # target_angles = [3.1415, 2.0117, 2.9954, 0.0005, -1.2761, -0.0005]

@@ -57,12 +57,24 @@ def calculate_ik_adaptive(x, y, z, roll, pitch, yaw, current_j4_physical=0.0, co
         # print(f"迭代 {iteration + 1}: 当前 J4 数学角度: {theta4_math:.4f} rad,L: {L:.4f} ,psi: {psi:.4f} rad, D_offset: {D_offset:.4f} m")
 
         R_xy = math.sqrt(P_wc[0]**2 + P_wc[1]**2)
+        # if R_xy < abs(D_offset):
+        #     # raise ValueError(f"迭代第 {iteration} 次时进入死区！目标点过近。")
+        #     beta = math.pi / 2 if D_offset > 0 else -math.pi / 2
+
+
         if R_xy < abs(D_offset):
-            raise ValueError(f"迭代第 {iteration} 次时进入死区！目标点过近。")
+            # 这通常发生在腕心 P_wc 距离 Z 轴太近时
+            # 强制让 beta 变为 pi/2 或 -pi/2，即让手臂尽力向中心靠拢
+            beta = math.pi / 2 if D_offset > 0 else -math.pi / 2
+        else:
+            beta = math.asin(D_offset / R_xy)
+
+        if sign_shoulder < 0:
+            beta = math.pi - beta
 
         phi = math.atan2(P_wc[1], P_wc[0])
-        beta = math.asin(D_offset / R_xy) if sign_shoulder > 0 else math.pi - math.asin(D_offset / R_xy)
         theta[0] = phi + beta
+
 
         X = P_wc[0] * math.cos(theta[0]) + P_wc[1] * math.sin(theta[0])
         Y = P_wc[2]
@@ -200,67 +212,60 @@ def find_best_ik_solution(x, y, z, roll, pitch, yaw, current_angles):
 
 def forward_kinematics(joint_angles_rad):
     """
-    纯数学版的正运动学求解器
+    基于全局 DH 参数的 6 轴机械臂正运动学求解
     输入: 
-        joint_angles_rad: 长度为 6 的列表/数组，代表电机的当前弧度角
+        joint_angles_rad: 长度为 6 的列表/数组，电机当前的物理弧度角 (q)
     输出:
         x, y, z: 末端位置 (米)
-        roll, pitch, yaw: 末端姿态 (弧度)
+        roll, pitch, yaw: 末端姿态 (弧度, ZYX 欧拉角)
     """
-    # 1. 机械臂物理参数配置 (固定写死在函数内部，或者作为全局常量)
-    # # 大臂
-    # dh_params = np.array([
-    #     # [theta_off,  d,         alpha,     a  ]
-    #     [np.pi,       0,         np.pi/2,   0   ],   # J1
-    #     [0,           0,         0,         0.29],   # J2
-    #     [0,          -0.10375,  -np.pi/2,   0   ],   # J3
-    #     [np.pi,       0.410147,  np.pi/2,   0.03],   # J4
-    #     [np.pi/2,     0,        -np.pi/2,   0   ],   # J5
-    #     [np.pi,       0.211,     0,         0   ]    # J6
-    # ])
-    # 自定义
-     #  [theta_offset, d, alpha, a]
-    dh_params = np.array([
-        # [theta_off,  d,         alpha,     a  ]
-        [np.pi,       0,         np.pi/2,   0   ],   # J1
-        [0,           0,         0,         0.116],   # J2
-        [0,          -0.0415,  -np.pi/2,   0   ],   # J3
-        [np.pi,       0.16086,  np.pi/2,   0.012],   # J4
-        [np.pi/2,     0,        -np.pi/2,   0   ],   # J5
-        [0,       0.0844,     0,         0   ]    # J6
-    ])
-    # 2. 依次相乘计算 4x4 齐次变换矩阵
+    
+    # 1. 初始化 4x4 单位矩阵
     T = np.eye(4)
-    for i, row in enumerate(dh_params):
-        theta_total = joint_angles_rad[i] + row[0]
-        d, alpha, a = row[1], row[2], row[3]
-
-        ct, st = np.cos(theta_total), np.sin(theta_total)
-        ca, sa = np.cos(alpha), np.sin(alpha)
-
+    
+    # 2. 迭代计算每一级关节的变换矩阵 (T_01, T_12, ..., T_56)
+    # 逻辑：theta = q_motor + theta_offset
+    for i in range(6):
+        theta = joint_angles_rad[i] + THETA_OFFSET[i]
+        d = D_PARAMS[i]
+        a = A_PARAMS[i]
+        alpha = ALPHA_PARAMS[i]
+        
+        ct, st = math.cos(theta), math.sin(theta)
+        ca, sa = math.cos(alpha), math.sin(alpha)
+        
+        # 标准 DH 变换矩阵公式
         T_step = np.array([
-            [ct, -st*ca,  st*sa, a*ct],
-            [st,  ct*ca, -ct*sa, a*st],
-            [0,   sa,     ca,    d],
-            [0,   0,      0,     1]
+            [ct, -st * ca,  st * sa, a * ct],
+            [st,  ct * ca, -ct * sa, a * st],
+            [ 0,       sa,       ca,      d],
+            [ 0,        0,        0,      1]
         ])
+        
+        # 矩阵累乘
         T = T @ T_step
 
-    # 3. 从 4x4 矩阵 T 中提取 X, Y, Z
+    # 3. 提取末端位置 (x, y, z)
     x, y, z = T[0, 3], T[1, 3], T[2, 3]
 
-    # 4. 提取 Roll, Pitch, Yaw (采用 ZYX 欧拉角约定)
-    sy = np.sqrt(T[0, 0] * T[0, 0] + T[1, 0] * T[1, 0])
-    singular = sy < 1e-6  # 检查是否处于万向锁奇异点
+    # 4. 提取末端姿态 (Roll, Pitch, Yaw)
+    # 采用 ZYX 欧拉角约定 (r31 = -sin(pitch))
+    # T[0,0]=cos(y)cos(p), T[1,0]=sin(y)cos(p), T[2,0]=-sin(p)
+    
+    sy = math.sqrt(T[0, 0]**2 + T[1, 0]**2)
+    singular = sy < 1e-6  # 万向锁判定阈值
 
     if not singular:
-        roll = np.arctan2(T[2, 1], T[2, 2])
-        pitch = np.arctan2(-T[2, 0], sy)
-        yaw = np.arctan2(T[1, 0], T[0, 0])
+        # 正常情况
+        roll  = math.atan2(T[2, 1], T[2, 2])
+        pitch = math.atan2(-T[2, 0], sy)
+        yaw   = math.atan2(T[1, 0], T[0, 0])
     else:
-        roll = np.arctan2(-T[1, 2], T[1, 1])
-        pitch = np.arctan2(-T[2, 0], sy)
-        yaw = 0
+        # 发生万向锁 (Pitch = ±90°)
+        # 此时只能求出 Roll 和 Yaw 的和或差，通常设 Yaw 为 0
+        roll  = math.atan2(-T[1, 2], T[1, 1])
+        pitch = math.atan2(-T[2, 0], sy)
+        yaw   = 0.0
 
     return x, y, z, roll, pitch, yaw
 # ==========================================
