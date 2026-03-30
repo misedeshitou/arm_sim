@@ -4,10 +4,10 @@ import math
 # ==========================================
 # 1. 机械臂物理参数配置 (MCU 上的 const 数组)
 # ==========================================
-A_PARAMS     = [0.0,       0.290, 0.0,      0.03,      0.0,       0.0]
-D_PARAMS     = [0.0,       0.0,  -0.10375,  0.40147,  0.0,       0.211]
+A_PARAMS     = [0.0,       0.116, 0.0,      0.012,      0.0,       0.0]
+D_PARAMS     = [0.0,       0.0,  -0.0415,  0.16086,  0.0,       0.0844]
 ALPHA_PARAMS = [math.pi/2, 0.0,  -math.pi/2, math.pi/2, -math.pi/2, 0.0]
-THETA_OFFSET = [math.pi,   0.0,   0.0,      math.pi,   math.pi/2, math.pi]
+THETA_OFFSET = [math.pi,   0.0,   0.0,      math.pi,   math.pi/2, 0]
 
 # ==========================================
 # 2. 基础数学工具
@@ -144,6 +144,15 @@ def calculate_ik_adaptive(x, y, z, roll, pitch, yaw, current_j4_physical=0.0, co
     for i in range(6):
         q_out[i] = theta[i] - THETA_OFFSET[i]
         q_out[i] = (q_out[i] + math.pi) % (2 * math.pi) - math.pi
+
+    # 🌟 新增：严格计算末端误差，拦截“伪收敛” 🌟
+    # 注意：为了避免循环导入或依赖，你可能需要将 forward_kinematics 的数学部分提取出来，或者直接在这里验证 P_wc
+    # 这里我们验证生成的 q_out 是否能让腕心 P_wc 达到目标，或者直接验证末端 XYZ
+    x_calc, y_calc, z_calc, _, _, _ = forward_kinematics(q_out)
+    pos_error = math.sqrt((x_calc - x)**2 + (y_calc - y)**2 + (z_calc - z)**2)
+    
+    if pos_error > 0.005: # 设定 5mm 为无法接受的误差阈值
+        raise ValueError(f"⚠️ 算法伪收敛！坐标物理不可达或进入死区 (位置误差: {pos_error*1000:.1f} mm)。")
 
     return q_out
 
